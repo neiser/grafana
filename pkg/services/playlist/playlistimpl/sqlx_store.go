@@ -20,6 +20,7 @@ func (s *sqlxStore) Insert(ctx context.Context, cmd *playlist.CreatePlaylistComm
 	if err != nil {
 		return nil, err
 	}
+
 	p = playlist.Playlist{
 		Name:     cmd.Name,
 		Interval: cmd.Interval,
@@ -33,24 +34,33 @@ func (s *sqlxStore) Insert(ctx context.Context, cmd *playlist.CreatePlaylistComm
 	}
 	defer tx.Rollback()
 
-	if _, err = tx.NamedExecContext(ctx, s.sqlxdb.Rebind("INSERT INTO playlist (name, interval, org_id, uid) VALUES (:name, :interval, :org_id, :uid)"), &p); err != nil {
+	res, err := tx.NamedExecContext(ctx, s.sqlxdb.Rebind("INSERT INTO playlist (name, interval, org_id, uid) VALUES (:name, :interval, :org_id, :uid)"), &p)
+	if err != nil {
 		return nil, err
 	}
 
-	playlistItems := make([]playlist.PlaylistItem, 0)
-	for _, item := range cmd.Items {
-		playlistItems = append(playlistItems, playlist.PlaylistItem{
-			PlaylistId: p.Id,
-			Type:       item.Type,
-			Value:      item.Value,
-			Order:      item.Order,
-			Title:      item.Title,
-		})
-	}
-	_, err = tx.NamedExecContext(ctx, s.sqlxdb.Rebind(`INSERT INTO playlist_item (playlist_id, type, value, title, order)
-        VALUES (:playlist_id, :type, :value, :title, :order)`), playlistItems)
+	lastId, err := res.LastInsertId()
 	if err != nil {
 		return nil, err
+	}
+
+	if len(cmd.Items) > 0 {
+		playlistItems := make([]playlist.PlaylistItem, 0)
+		for _, item := range cmd.Items {
+			playlistItems = append(playlistItems, playlist.PlaylistItem{
+				PlaylistId: lastId,
+				Type:       item.Type,
+				Value:      item.Value,
+				Order:      item.Order,
+				Title:      item.Title,
+			})
+		}
+
+		query := "INSERT INTO playlist_item (`order`, playlist_id, type, value, title) VALUES (:order, :playlist_id, :type, :value, :title)"
+		_, err = tx.NamedExecContext(ctx, query, playlistItems)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if err = tx.Commit(); err != nil {
@@ -84,51 +94,37 @@ func (s *sqlxStore) Update(ctx context.Context, cmd *playlist.UpdatePlaylistComm
 	}
 	defer tx.Rollback()
 
-	_, err = tx.NamedExecContext(ctx, s.sqlxdb.Rebind(`UPDATE playlist (playlist_id, type, value, title, order)
-	VALUES (:playlist_id, :type, :value, :title, :order)`), p)
+	_, err = tx.NamedExecContext(ctx, `UPDATE playlist SET uid=:uid, org_id=:org_id, name=:name, interval=:interval WHERE id=:id`, p)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err = tx.ExecContext(ctx, s.sqlxdb.Rebind("DELETE FROM playlist_item WHERE playlist_id = ?"), p.Id); err != nil {
+		return nil, err
+	}
+
+	playlistItems := make([]playlist.PlaylistItem, 0)
+
+	for index, item := range cmd.Items {
+		playlistItems = append(playlistItems, playlist.PlaylistItem{
+			PlaylistId: p.Id,
+			Type:       item.Type,
+			Value:      item.Value,
+			Order:      index,
+			Title:      item.Title,
+		})
+	}
+
+	query := "INSERT INTO playlist_item (playlist_id, type, value, title, `order`) VALUES (:playlist_id, :type, :value, :title, :order)"
+	_, err = tx.NamedExecContext(ctx, query, playlistItems)
+	if err != nil {
+		return nil, err
+	}
 
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
 
-	// To be implemented
-	// err := s.db.WithTransactionalDbSession(ctx, func(sess *sqlstore.DBSession) error {
-
-	// 	dto = playlist.PlaylistDTO{
-	// 		Id:       p.Id,
-	// 		UID:      p.UID,
-	// 		OrgId:    p.OrgId,
-	// 		Name:     p.Name,
-	// 		Interval: p.Interval,
-	// 	}
-
-	// 	_, err = sess.Where("id=?", p.Id).Cols("name", "interval").Update(&p)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-
-	// 	rawSQL := "DELETE FROM playlist_item WHERE playlist_id = ?"
-	// 	_, err = sess.Exec(rawSQL, p.Id)
-
-	// 	if err != nil {
-	// 		return err
-	// 	}
-
-	// 	playlistItems := make([]models.PlaylistItem, 0)
-
-	// 	for index, item := range cmd.Items {
-	// 		playlistItems = append(playlistItems, models.PlaylistItem{
-	// 			PlaylistId: p.Id,
-	// 			Type:       item.Type,
-	// 			Value:      item.Value,
-	// 			Order:      index + 1,
-	// 			Title:      item.Title,
-	// 		})
-	// 	}
-
-	// 	_, err = sess.Insert(&playlistItems)
-	// 	return err
-	// })
 	return &dto, err
 }
 
@@ -160,6 +156,9 @@ func (s *sqlxStore) Delete(ctx context.Context, cmd *playlist.DeletePlaylistComm
 
 	p := playlist.Playlist{}
 	if err = s.sqlxdb.GetContext(ctx, &p, s.sqlxdb.Rebind("SELECT * FROM playlist WHERE uid=? AND org_id=?"), cmd.UID, cmd.OrgId); err != nil {
+		if err == sql.ErrNoRows {
+			return nil
+		}
 		return err
 	}
 
@@ -205,6 +204,7 @@ func (s *sqlxStore) GetItems(ctx context.Context, query *playlist.GetPlaylistIte
 	if err != nil {
 		return playlistItems, err
 	}
+
 	err = s.sqlxdb.SelectContext(ctx, &playlistItems, s.sqlxdb.Rebind("SELECT * FROM playlist_item WHERE playlist_id=?"), p.Id)
 	return playlistItems, err
 }
@@ -212,7 +212,7 @@ func (s *sqlxStore) GetItems(ctx context.Context, query *playlist.GetPlaylistIte
 func newGenerateAndValidateNewPlaylistUid(ctx context.Context, db *sqlx.DB, orgId int64) (string, error) {
 	for i := 0; i < 3; i++ {
 		uid := generateNewUid()
-		p := models.Playlist{}
+		p := playlist.Playlist{}
 		err := db.GetContext(ctx, &p, db.Rebind("SELECT * FROM playlist WHERE uid=? AND org_id=?"), uid, orgId)
 		if err != nil {
 			if err == sql.ErrNoRows {

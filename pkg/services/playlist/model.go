@@ -65,8 +65,7 @@ type CreatePlaylistCommand struct {
 	Name     string            `json:"name" binding:"Required"`
 	Interval string            `json:"interval"`
 	Items    []PlaylistItemDTO `json:"items"`
-
-	OrgId int64 `json:"-"`
+	OrgId    int64             `json:"-"`
 }
 
 type DeletePlaylistCommand struct {

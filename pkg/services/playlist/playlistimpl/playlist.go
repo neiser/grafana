@@ -6,7 +6,6 @@ import (
 	"github.com/grafana/grafana/pkg/services/playlist"
 	"github.com/grafana/grafana/pkg/services/sqlstore/db"
 	"github.com/grafana/grafana/pkg/setting"
-	"github.com/jmoiron/sqlx"
 )
 
 type Service struct {
@@ -17,7 +16,7 @@ func ProvideService(db db.DB, cfg *setting.Cfg) playlist.Service {
 	if cfg.IsFeatureToggleEnabled("NewDBLibrary") {
 		return &Service{
 			store: &sqlxStore{
-				sqlxdb:  sqlx.NewDb(db.GetDB().DB, db.GetDialect().DriverName()),
+				sqlxdb:  db.GetDB(),
 				dialect: db.GetDialect(),
 			},
 		}

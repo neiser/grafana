@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/go-sql-driver/mysql"
+	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 	"github.com/prometheus/client_golang/prometheus"
-	"xorm.io/core"
 	"xorm.io/xorm"
 
 	"github.com/grafana/grafana/pkg/bus"
@@ -180,8 +180,8 @@ func (ss *SQLStore) GetDialect() migrator.Dialect {
 	return ss.Dialect
 }
 
-func (ss *SQLStore) GetDB() *core.DB {
-	return ss.engine.DB()
+func (ss *SQLStore) GetDB() *sqlx.DB {
+	return sqlx.NewDb(ss.engine.DB().DB, ss.GetDialect().DriverName())
 }
 
 func (ss *SQLStore) ensureMainOrgAndAdminUser() error {

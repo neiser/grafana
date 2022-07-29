@@ -16,6 +16,21 @@ type sqlxStore struct {
 	dialect migrator.Dialect
 }
 
+func WithTransaction(ctx context.Context, db *sqlx.DB, fn func(*sqlx.Tx) error) error {
+	tx, err := db.Beginx()
+	if err != nil {
+		return err
+	}
+	err = fn(tx)
+	if err != nil {
+		if rbErr := tx.Rollback(); rbErr != nil {
+			return fmt.Errorf("tx err: %v, rb err: %v", err, rbErr)
+		}
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *sqlxStore) insertWithReturningId(ctx context.Context, tx *sqlx.Tx, p *playlist.Playlist) error {
 	if s.dialect.DriverName() == "postgres" {
 		query := fmt.Sprintf("INSERT INTO playlist (name, %s, org_id, uid) VALUES (?, ?, ?, ?) RETURNING id", s.dialect.Quote("interval"))
@@ -54,38 +69,31 @@ func (s *sqlxStore) Insert(ctx context.Context, cmd *playlist.CreatePlaylistComm
 		UID:      uid,
 	}
 
-	tx, err := s.sqlxdb.Beginx()
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	err = s.insertWithReturningId(ctx, tx, &p)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(cmd.Items) > 0 {
-		playlistItems := make([]playlist.PlaylistItem, 0)
-		for _, item := range cmd.Items {
-			playlistItems = append(playlistItems, playlist.PlaylistItem{
-				PlaylistId: p.Id,
-				Type:       item.Type,
-				Value:      item.Value,
-				Order:      item.Order,
-				Title:      item.Title,
-			})
-		}
-		query := fmt.Sprintf("INSERT INTO playlist_item (playlist_id, type, value, title, %s) VALUES (:playlist_id, :type, :value, :title, :order)", s.dialect.Quote("order"))
-		_, err = tx.NamedExecContext(ctx, query, playlistItems)
+	err = WithTransaction(ctx, s.sqlxdb, func(tx *sqlx.Tx) error {
+		err = s.insertWithReturningId(ctx, tx, &p)
 		if err != nil {
-			return nil, err
+			return err
 		}
-	}
 
-	if err = tx.Commit(); err != nil {
-		return nil, err
-	}
+		if len(cmd.Items) > 0 {
+			playlistItems := make([]playlist.PlaylistItem, 0)
+			for _, item := range cmd.Items {
+				playlistItems = append(playlistItems, playlist.PlaylistItem{
+					PlaylistId: p.Id,
+					Type:       item.Type,
+					Value:      item.Value,
+					Order:      item.Order,
+					Title:      item.Title,
+				})
+			}
+			query := fmt.Sprintf("INSERT INTO playlist_item (playlist_id, type, value, title, %s) VALUES (:playlist_id, :type, :value, :title, :order)", s.dialect.Quote("order"))
+			_, err = tx.NamedExecContext(ctx, query, playlistItems)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 
 	return &p, err
 }
@@ -108,42 +116,32 @@ func (s *sqlxStore) Update(ctx context.Context, cmd *playlist.UpdatePlaylistComm
 		Interval: cmd.Interval,
 	}
 
-	tx, err := s.sqlxdb.Beginx()
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
+	err = WithTransaction(ctx, s.sqlxdb, func(tx *sqlx.Tx) error {
+		query := fmt.Sprintf("UPDATE playlist SET uid=:uid, org_id=:org_id, name=:name, %s=:interval WHERE id=:id", s.dialect.Quote("interval"))
+		_, err = tx.NamedExecContext(ctx, query, p)
+		if err != nil {
+			return err
+		}
 
-	query := fmt.Sprintf("UPDATE playlist SET uid=:uid, org_id=:org_id, name=:name, %s=:interval WHERE id=:id", s.dialect.Quote("interval"))
-	_, err = tx.NamedExecContext(ctx, query, p)
-	if err != nil {
-		return nil, err
-	}
+		if _, err = tx.ExecContext(ctx, s.sqlxdb.Rebind("DELETE FROM playlist_item WHERE playlist_id = ?"), p.Id); err != nil {
+			return err
+		}
 
-	if _, err = tx.ExecContext(ctx, s.sqlxdb.Rebind("DELETE FROM playlist_item WHERE playlist_id = ?"), p.Id); err != nil {
-		return nil, err
-	}
+		playlistItems := make([]playlist.PlaylistItem, 0)
 
-	playlistItems := make([]playlist.PlaylistItem, 0)
-
-	for index, item := range cmd.Items {
-		playlistItems = append(playlistItems, playlist.PlaylistItem{
-			PlaylistId: p.Id,
-			Type:       item.Type,
-			Value:      item.Value,
-			Order:      index,
-			Title:      item.Title,
-		})
-	}
-	query = fmt.Sprintf("INSERT INTO playlist_item (playlist_id, type, value, title, %s) VALUES (:playlist_id, :type, :value, :title, :order)", s.dialect.Quote("order"))
-	_, err = tx.NamedExecContext(ctx, query, playlistItems)
-	if err != nil {
-		return nil, err
-	}
-
-	if err = tx.Commit(); err != nil {
-		return nil, err
-	}
+		for index, item := range cmd.Items {
+			playlistItems = append(playlistItems, playlist.PlaylistItem{
+				PlaylistId: p.Id,
+				Type:       item.Type,
+				Value:      item.Value,
+				Order:      index,
+				Title:      item.Title,
+			})
+		}
+		query = fmt.Sprintf("INSERT INTO playlist_item (playlist_id, type, value, title, %s) VALUES (:playlist_id, :type, :value, :title, :order)", s.dialect.Quote("order"))
+		_, err = tx.NamedExecContext(ctx, query, playlistItems)
+		return err
+	})
 
 	return &dto, err
 }
@@ -168,31 +166,26 @@ func (s *sqlxStore) Delete(ctx context.Context, cmd *playlist.DeletePlaylistComm
 	if cmd.UID == "" || cmd.OrgId == 0 {
 		return playlist.ErrCommandValidationFailed
 	}
-	tx, err := s.sqlxdb.Beginx()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 
 	p := playlist.Playlist{}
-	if err = s.sqlxdb.GetContext(ctx, &p, s.sqlxdb.Rebind("SELECT * FROM playlist WHERE uid=? AND org_id=?"), cmd.UID, cmd.OrgId); err != nil {
+	if err := s.sqlxdb.GetContext(ctx, &p, s.sqlxdb.Rebind("SELECT * FROM playlist WHERE uid=? AND org_id=?"), cmd.UID, cmd.OrgId); err != nil {
 		if err == sql.ErrNoRows {
 			return nil
 		}
 		return err
 	}
 
-	if _, err = tx.ExecContext(ctx, s.sqlxdb.Rebind("DELETE FROM playlist WHERE uid = ? and org_id = ?"), cmd.UID, cmd.OrgId); err != nil {
-		return err
-	}
+	err := WithTransaction(ctx, s.sqlxdb, func(tx *sqlx.Tx) error {
+		if _, err := tx.ExecContext(ctx, s.sqlxdb.Rebind("DELETE FROM playlist WHERE uid = ? and org_id = ?"), cmd.UID, cmd.OrgId); err != nil {
+			return err
+		}
 
-	if _, err = tx.ExecContext(ctx, s.sqlxdb.Rebind("DELETE FROM playlist_item WHERE playlist_id = ?"), p.Id); err != nil {
-		return err
-	}
+		if _, err := tx.ExecContext(ctx, s.sqlxdb.Rebind("DELETE FROM playlist_item WHERE playlist_id = ?"), p.Id); err != nil {
+			return err
+		}
+		return nil
+	})
 
-	if err = tx.Commit(); err != nil {
-		return err
-	}
 	return err
 }
 

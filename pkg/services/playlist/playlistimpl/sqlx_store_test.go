@@ -6,7 +6,6 @@ import (
 
 	"github.com/grafana/grafana/pkg/services/playlist"
 	"github.com/grafana/grafana/pkg/services/sqlstore"
-	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,7 +15,7 @@ func TestIntegrationSQLxPlaylistDataAccess(t *testing.T) {
 	}
 
 	ss := sqlstore.InitTestDB(t)
-	playlistStore := sqlxStore{sqlxdb: sqlx.NewDb(ss.GetDB().DB, ss.GetDialect().DriverName()), dialect: ss.GetDialect()}
+	playlistStore := sqlxStore{sqlxdb: ss.GetDB(), dialect: ss.GetDialect()}
 
 	t.Run("Can create playlist", func(t *testing.T) {
 		items := []playlist.PlaylistItemDTO{

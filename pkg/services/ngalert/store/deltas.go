@@ -120,3 +120,46 @@ func CalculateChanges(ctx context.Context, ruleReader RuleReader, groupKey model
 		Update:         toUpdate,
 	}, nil
 }
+
+// UpdateCalculatedRuleFields refreshes the calculated fields in a set of alert rule changes.
+func UpdateCalculatedRuleFields(ch *GroupDelta) *GroupDelta {
+	updatingRules := make(map[ngmodels.AlertRuleKey]struct{}, len(ch.Delete)+len(ch.Update))
+	for _, update := range ch.Update {
+		updatingRules[update.Existing.GetKey()] = struct{}{}
+	}
+	for _, del := range ch.Delete {
+		updatingRules[del.GetKey()] = struct{}{}
+	}
+	var toUpdate []RuleDelta
+	for groupKey, rules := range ch.AffectedGroups {
+		if groupKey != ch.GroupKey {
+			rules.SortByGroupIndex()
+		}
+		idx := 1
+		for _, rule := range rules {
+			if _, ok := updatingRules[rule.GetKey()]; ok { // exclude rules that are going to be either updated or deleted
+				continue
+			}
+			upd := RuleDelta{
+				Existing: rule,
+				New:      rule,
+			}
+			if groupKey != ch.GroupKey {
+				if rule.RuleGroupIndex != idx {
+					upd.New = ngmodels.CopyRule(rule)
+					upd.New.RuleGroupIndex = idx
+					upd.Diff = rule.Diff(upd.New, AlertRuleFieldsToIgnoreInDiff[:]...)
+				}
+				idx++
+			}
+			toUpdate = append(toUpdate, upd)
+		}
+	}
+	return &GroupDelta{
+		GroupKey:       ch.GroupKey,
+		AffectedGroups: ch.AffectedGroups,
+		New:            ch.New,
+		Update:         append(ch.Update, toUpdate...),
+		Delete:         ch.Delete,
+	}
+}

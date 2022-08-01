@@ -353,7 +353,7 @@ func (srv RulerSrv) updateAlertRulesInGroup(c *models.ReqContext, groupKey ngmod
 			return err
 		}
 
-		finalChanges = calculateAutomaticChanges(groupChanges)
+		finalChanges = store.UpdateCalculatedRuleFields(groupChanges)
 		logger.Debug("updating database with the authorized changes", "add", len(finalChanges.New), "update", len(finalChanges.New), "delete", len(finalChanges.Delete))
 
 		if len(finalChanges.Update) > 0 || len(finalChanges.New) > 0 {
@@ -525,49 +525,4 @@ func verifyProvisionedRulesNotAffected(ctx context.Context, provenanceStore prov
 		return nil
 	}
 	return fmt.Errorf("%w: alert rule group [%s]", errProvisionedResource, errorMsg.String())
-}
-
-// calculateAutomaticChanges scans all affected groups and creates either a noop update that will increment the version of each rule as well as re-index other groups.
-// this is needed to make sure that there are no any concurrent changes made to all affected groups.
-// Returns a copy of changes enriched with either noop or group index changes for all rules in
-func calculateAutomaticChanges(ch *store.GroupDelta) *store.GroupDelta {
-	updatingRules := make(map[ngmodels.AlertRuleKey]struct{}, len(ch.Delete)+len(ch.Update))
-	for _, update := range ch.Update {
-		updatingRules[update.Existing.GetKey()] = struct{}{}
-	}
-	for _, del := range ch.Delete {
-		updatingRules[del.GetKey()] = struct{}{}
-	}
-	var toUpdate []store.RuleDelta
-	for groupKey, rules := range ch.AffectedGroups {
-		if groupKey != ch.GroupKey {
-			rules.SortByGroupIndex()
-		}
-		idx := 1
-		for _, rule := range rules {
-			if _, ok := updatingRules[rule.GetKey()]; ok { // exclude rules that are going to be either updated or deleted
-				continue
-			}
-			upd := store.RuleDelta{
-				Existing: rule,
-				New:      rule,
-			}
-			if groupKey != ch.GroupKey {
-				if rule.RuleGroupIndex != idx {
-					upd.New = ngmodels.CopyRule(rule)
-					upd.New.RuleGroupIndex = idx
-					upd.Diff = rule.Diff(upd.New, store.AlertRuleFieldsToIgnoreInDiff[:]...)
-				}
-				idx++
-			}
-			toUpdate = append(toUpdate, upd)
-		}
-	}
-	return &store.GroupDelta{
-		GroupKey:       ch.GroupKey,
-		AffectedGroups: ch.AffectedGroups,
-		New:            ch.New,
-		Update:         append(ch.Update, toUpdate...),
-		Delete:         ch.Delete,
-	}
 }

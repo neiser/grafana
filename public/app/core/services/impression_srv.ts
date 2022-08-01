@@ -1,4 +1,4 @@
-import { filter, isArray, isNumber } from 'lodash';
+import { filter, isArray, isNumber, isString } from 'lodash';
 
 import config from 'app/core/config';
 import store from 'app/core/store';
@@ -6,9 +6,9 @@ import store from 'app/core/store';
 export class ImpressionSrv {
   constructor() {}
 
-  addDashboardImpression(dashboardId: number) {
+  addDashboardImpression(dashboardUID: string) {
     const impressionsKey = this.impressionKey();
-    let impressions = [];
+    let impressions: string[] = [];
     if (store.exists(impressionsKey)) {
       impressions = JSON.parse(store.get(impressionsKey));
       if (!isArray(impressions)) {
@@ -17,10 +17,10 @@ export class ImpressionSrv {
     }
 
     impressions = impressions.filter((imp) => {
-      return dashboardId !== imp;
+      return dashboardUID !== imp;
     });
 
-    impressions.unshift(dashboardId);
+    impressions.unshift(dashboardUID);
 
     if (impressions.length > 50) {
       impressions.pop();
@@ -29,13 +29,13 @@ export class ImpressionSrv {
   }
 
   /** Returns an array of internal (numeric) dashboard IDs */
-  getDashboardOpened(): number[] {
+  getDashboardOpened(): string[] {
     let impressions = store.get(this.impressionKey()) || '[]';
 
     impressions = JSON.parse(impressions);
 
     impressions = filter(impressions, (el) => {
-      return isNumber(el);
+      return isString(el);
     });
 
     return impressions;

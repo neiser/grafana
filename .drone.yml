@@ -785,6 +785,12 @@ trigger:
   branch: main
   event:
   - push
+  paths:
+    include:
+    - '*.md'
+    - docs/**
+    - packages/**
+    - latest.json
 type: docker
 volumes:
 - host:
@@ -860,6 +866,11 @@ trigger:
   branch: main
   event:
   - push
+  paths:
+    exclude:
+    - '*.md'
+    - docs/**
+    - latest.json
 type: docker
 volumes:
 - host:
@@ -962,6 +973,11 @@ trigger:
   branch: main
   event:
   - push
+  paths:
+    exclude:
+    - '*.md'
+    - docs/**
+    - latest.json
 type: docker
 volumes:
 - host:
@@ -1372,6 +1388,11 @@ trigger:
   branch: main
   event:
   - push
+  paths:
+    exclude:
+    - '*.md'
+    - docs/**
+    - latest.json
 type: docker
 volumes:
 - host:
@@ -1476,6 +1497,11 @@ trigger:
   branch: main
   event:
   - push
+  paths:
+    exclude:
+    - '*.md'
+    - docs/**
+    - latest.json
 type: docker
 volumes:
 - host:
@@ -1540,6 +1566,11 @@ trigger:
   branch: main
   event:
   - push
+  paths:
+    exclude:
+    - '*.md'
+    - docs/**
+    - latest.json
   repo:
   - grafana/grafana
 type: docker
@@ -1638,6 +1669,11 @@ trigger:
   branch: main
   event:
   - push
+  paths:
+    exclude:
+    - '*.md'
+    - docs/**
+    - latest.json
   repo:
   - grafana/grafana
 type: docker
@@ -1673,6 +1709,11 @@ trigger:
   branch: main
   event:
   - push
+  paths:
+    exclude:
+    - '*.md'
+    - docs/**
+    - latest.json
   status:
   - failure
 type: docker
@@ -5016,6 +5057,6 @@ kind: secret
 name: gcp_upload_artifacts_key
 ---
 kind: signature
-hmac: 968320e69b8531451dec23ac2d586296616533986c9e9a767410975109220072
+hmac: bfd7ec78f0124cbc643d6b59718f4169e17ca485a47f13b3797e2190bb4b78f7
 
 ...

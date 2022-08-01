@@ -122,6 +122,7 @@ func CalculateChanges(ctx context.Context, ruleReader RuleReader, groupKey model
 }
 
 // UpdateCalculatedRuleFields refreshes the calculated fields in a set of alert rule changes.
+// This may generate new changes to keep a group consistent, such as versions or rule indexes.
 func UpdateCalculatedRuleFields(ch *GroupDelta) *GroupDelta {
 	updatingRules := make(map[ngmodels.AlertRuleKey]struct{}, len(ch.Delete)+len(ch.Update))
 	for _, update := range ch.Update {

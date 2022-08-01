@@ -452,6 +452,5 @@ func randFolder() *grafana_models.Folder {
 		Updated:   time.Time{},
 		UpdatedBy: 0,
 		CreatedBy: 0,
-		HasAcl:    false,
 	}
 }

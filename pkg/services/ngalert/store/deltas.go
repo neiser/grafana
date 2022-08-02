@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/grafana/grafana/pkg/services/ngalert/models"
-	ngmodels "github.com/grafana/grafana/pkg/services/ngalert/models"
 	"github.com/grafana/grafana/pkg/util/cmputil"
 )
 
@@ -13,19 +12,19 @@ import (
 var AlertRuleFieldsToIgnoreInDiff = [...]string{"ID", "Version", "Updated"}
 
 type RuleDelta struct {
-	Existing *ngmodels.AlertRule
-	New      *ngmodels.AlertRule
+	Existing *models.AlertRule
+	New      *models.AlertRule
 	Diff     cmputil.DiffReport
 }
 
 type GroupDelta struct {
-	GroupKey ngmodels.AlertRuleGroupKey
+	GroupKey models.AlertRuleGroupKey
 	// AffectedGroups contains all rules of all groups that are affected by these changes.
 	// For example, during moving a rule from one group to another this map will contain all rules from two groups
-	AffectedGroups map[ngmodels.AlertRuleGroupKey]ngmodels.RulesGroup
-	New            []*ngmodels.AlertRule
+	AffectedGroups map[models.AlertRuleGroupKey]models.RulesGroup
+	New            []*models.AlertRule
 	Update         []RuleDelta
-	Delete         []*ngmodels.AlertRule
+	Delete         []*models.AlertRule
 }
 
 func (c *GroupDelta) IsEmpty() bool {
@@ -33,8 +32,8 @@ func (c *GroupDelta) IsEmpty() bool {
 }
 
 type RuleReader interface {
-	ListAlertRules(ctx context.Context, query *ngmodels.ListAlertRulesQuery) error
-	GetAlertRulesGroupByRuleUID(ctx context.Context, query *ngmodels.GetAlertRulesGroupByRuleUIDQuery) error
+	ListAlertRules(ctx context.Context, query *models.ListAlertRulesQuery) error
+	GetAlertRulesGroupByRuleUID(ctx context.Context, query *models.GetAlertRulesGroupByRuleUIDQuery) error
 }
 
 // CalculateChanges calculates the difference between rules in the group in the database and the submitted rules. If a submitted rule has UID it tries to find it in the database (in other groups).
@@ -125,7 +124,7 @@ func CalculateChanges(ctx context.Context, ruleReader RuleReader, groupKey model
 // UpdateCalculatedRuleFields refreshes the calculated fields in a set of alert rule changes.
 // This may generate new changes to keep a group consistent, such as versions or rule indexes.
 func UpdateCalculatedRuleFields(ch *GroupDelta) *GroupDelta {
-	updatingRules := make(map[ngmodels.AlertRuleKey]struct{}, len(ch.Delete)+len(ch.Update))
+	updatingRules := make(map[models.AlertRuleKey]struct{}, len(ch.Delete)+len(ch.Update))
 	for _, update := range ch.Update {
 		updatingRules[update.Existing.GetKey()] = struct{}{}
 	}
@@ -148,7 +147,7 @@ func UpdateCalculatedRuleFields(ch *GroupDelta) *GroupDelta {
 			}
 			if groupKey != ch.GroupKey {
 				if rule.RuleGroupIndex != idx {
-					upd.New = ngmodels.CopyRule(rule)
+					upd.New = models.CopyRule(rule)
 					upd.New.RuleGroupIndex = idx
 					upd.Diff = rule.Diff(upd.New, AlertRuleFieldsToIgnoreInDiff[:]...)
 				}
